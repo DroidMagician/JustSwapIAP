@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
@@ -50,11 +53,22 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   int _counter = 0;
-  late List<ProductDetails> products;
-
+   List<ProductDetails>? products;
+  final InAppPurchase _inAppPurchase = InAppPurchase.instance;
+  late StreamSubscription<List<PurchaseDetails>> _subscription;
   @override
   void initState() {
-    getPurchaseProducts();
+    final Stream<List<PurchaseDetails>> purchaseUpdated =
+        _inAppPurchase.purchaseStream;
+    _subscription =
+        purchaseUpdated.listen((List<PurchaseDetails> purchaseDetailsList) {
+          _listenToPurchaseUpdated(purchaseDetailsList);
+        }, onDone: () {
+          _subscription.cancel();
+        }, onError: (Object error) {
+          // handle error here.
+        });
+    //getPurchaseProducts();
     super.initState();
   }
 
@@ -69,7 +83,68 @@ class _MyHomePageState extends State<MyHomePage> {
       _counter++;
     });
   }
+  Future<void> _listenToPurchaseUpdated(
+      List<PurchaseDetails> purchaseDetailsList) async {
+    for (final PurchaseDetails purchaseDetails in purchaseDetailsList) {
+      if (purchaseDetails.status == PurchaseStatus.pending) {
+          print("Pending");
+        //showPendingUI();
+      } else {
+        if (purchaseDetails.status == PurchaseStatus.error) {
+          print(purchaseDetails.error!);
+        } else if (purchaseDetails.status == PurchaseStatus.purchased ||
+            purchaseDetails.status == PurchaseStatus.restored) {
+          final bool valid = await _verifyPurchase(purchaseDetails);
+          if (valid) {
+            print("Deliver Products ${purchaseDetails.productID}");
+          } else {
+            _handleInvalidPurchase(purchaseDetails);
+            return;
+          }
+        }
+        // if (Platform.isAndroid) {
+        //   if (!_kAutoConsume && purchaseDetails.productID == _kConsumableId) {
+        //     final InAppPurchaseAndroidPlatformAddition androidAddition =
+        //     _inAppPurchase.getPlatformAddition<
+        //         InAppPurchaseAndroidPlatformAddition>();
+        //     await androidAddition.consumePurchase(purchaseDetails);
+        //   }
+        // }
+        if (purchaseDetails.pendingCompletePurchase) {
+          await _inAppPurchase.completePurchase(purchaseDetails);
+        }
+      }
+    }
+  }
+  void _handleInvalidPurchase(PurchaseDetails purchaseDetails) {
+    // handle invalid purchase here if  _verifyPurchase` failed
+    print("tets=>${purchaseDetails.error}=>${purchaseDetails.productID}");
+  }
+  // Future<void> deliverProduct(PurchaseDetails purchaseDetails) async {
+  //   // IMPORTANT!! Always verify purchase details before delivering the product.
+  //   if (purchaseDetails.productID == _kConsumableId) {
+  //     await ConsumableStore.save(purchaseDetails.purchaseID!);
+  //     final List<String> consumables = await ConsumableStore.load();
+  //     setState(() {
+  //       _purchasePending = false;
+  //       _consumables = consumables;
+  //     });
+  //   } else {
+  //     setState(() {
+  //       _purchases.add(purchaseDetails);
+  //       _purchasePending = false;
+  //     });
+  //   }
+  // }
+  Future<bool> _verifyPurchase(PurchaseDetails purchaseDetails) {
+    // IMPORTANT!! Always verify a purchase before delivering the product.
+    // For the purpose of an example, we directly return true.
+    if(purchaseDetails.status == PurchaseStatus.purchased)
+      {
 
+      }
+    return Future<bool>.value(true);
+  }
   getPurchaseProducts() async {
     // Set literals require Dart 2.2. Alternatively, use
 // `Set<String> _kIds = <String>['product1', 'product2'].toSet()`.
@@ -84,7 +159,7 @@ class _MyHomePageState extends State<MyHomePage> {
     }
     setState(() {
       products = response.productDetails;
-      products.forEach((element) {
+      products?.forEach((element) {
         print("Product List === ${element.title}");
       });
     });
@@ -107,12 +182,13 @@ class _MyHomePageState extends State<MyHomePage> {
       body: Center(
         // Center is a layout widget. It takes a single child and positions it
         // in the middle of the parent.
-        child: ListView.builder(
-            itemBuilder: (context, index) =>
-                ListTile(title: Text(products[index].title),onTap: (){
-                  getIsConsumable(products[index]);
+        child: products?.isNotEmpty == true ? ListView.builder(
+            itemBuilder: (context, index) => ListTile(
+                title: Text(products![index].title ?? ""),
+                onTap: () {
+                  getIsConsumable(products![index]);
                 }),
-            itemCount: products.length),
+            itemCount: products?.length) : null,
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _incrementCounter,
@@ -124,16 +200,39 @@ class _MyHomePageState extends State<MyHomePage> {
 
   getIsConsumable(ProductDetails product) async {
     final ProductDetails productDetails = product;
-    final PurchaseParam purchaseParam = PurchaseParam(productDetails: productDetails);
+    final PurchaseParam purchaseParam =
+        PurchaseParam(productDetails: productDetails);
 
-    var result = await InAppPurchase.instance.buyConsumable(purchaseParam: purchaseParam);
-    var result1 = InAppPurchase.instance.buyNonConsumable(purchaseParam: purchaseParam);
+    // var result = await InAppPurchase.instance
+    //     .buyConsumable(purchaseParam: purchaseParam);
+    var result1 =
+        InAppPurchase.instance.buyNonConsumable(purchaseParam: purchaseParam);
 
-
+   // print(object);
     // if (_isConsumable(productDetails)) {
     //
     // } else {
     // InAppPurchase.instance.buyNonConsumable(purchaseParam: purchaseParam);
     // }
+  }
+
+  bool? isConsumable(String productId) {
+    // Define a mapping of product identifiers to their consumable/non-consumable status
+    Map<String, bool> productMapping = {
+      'product1': true, // 'product1' is consumable
+      'product2': false, // 'product2' is non-consumable
+      // Add more products and their corresponding status here
+    };
+
+    // Check if the productId exists in the mapping and return its corresponding status
+    if (productMapping.containsKey(productId)) {
+      return productMapping[productId];
+    }
+
+    // If the productId is not found in the mapping, you can either consider it non-consumable by default
+    // or implement additional logic based on your requirements (e.g., fetching the product status from a server)
+
+    // Assuming it is non-consumable by default if not found in the mapping
+    return false;
   }
 }
